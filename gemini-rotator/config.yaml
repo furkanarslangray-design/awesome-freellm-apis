@@ -1,0 +1,117 @@
+# ==============================================================================
+# Gemini & Free LLM API Key Rotator & Rate Limiter Configuration
+# Repo: awesome-freellm-apis (Render Deployment Ready)
+# ==============================================================================
+# Bu dosya Render üzerinde veya yerel ortamda çalışan proxy sunucusunun
+# anahtar rotasyonunu, RPM (Request Per Minute), TPD (Tokens Per Day) ve RPD
+# limitlerini ücretsiz modellerin kotalarını aşmayacak şekilde yönetir.
+
+server:
+  port: 3000
+  host: "0.0.0.0"
+  openai_compatibility: true # /v1/chat/completions desteği
+  enable_cors: true
+  log_level: "info" # debug, info, warn, error
+
+# Varsayılan model ve sağlayıcı ayarları
+default_provider: "google-gemini"
+default_model: "gemini-3.8-flash"
+
+# Ücretsiz Model Kotası Koruma Parametreleri (Free Tier Safe Guard)
+rate_limits:
+  # RPM: Dakika Başına İstek Kotası.
+  # Google Gemini Free Tier resmi limiti 15 RPM'dir.
+  # 429 almamak ve dalgalanmaları absorbe etmek için güvenli değer: 14 RPM
+  max_rpm_per_key: 14
+
+  # TPM: Dakika Başına Token Kotası (Gemini Free: 1,000,000 TPM)
+  max_tpm_per_key: 1000000
+
+  # RPD: Günlük İstek Kotası (Gemini Free: 1,500 RPD)
+  max_rpd_per_key: 1500
+
+  # TPD: Günlük Token Kotası (Free model kotasını yormayacak güvenli değer: 1,000,000 TPD)
+  max_tpd_per_key: 1000000
+
+  # Token Bucket / İstek Kuyruğu
+  # Anahtar dakikalık limite ulaştığında hemen reddetmek yerine istek kuyruğa alınsın mı?
+  queue_when_limited: true
+  max_queue_size: 50
+  queue_timeout_ms: 25000
+
+# Anahtar Rotasyon ve Otomatik Geçiş Mekanizması (Key Failover & Rotation)
+rotation:
+  # Stratejiler:
+  #   - "failover_on_error" : Bir anahtar 429/kota hatası verene kadar onu kullan, bitince sonrakine geç
+  #   - "round_robin"       : Her istekte sıradaki sağlıklı anahtara geç (yükü eşit dağıtır)
+  #   - "least_used"        : Günlük en az token/istek harcamış sağlıklı anahtarı seç
+  strategy: "failover_on_error"
+
+  # Otomatik Hata Geçişi: 429 (Too Many Requests), RESOURCE_EXHAUSTED veya Kota Aşımında
+  # anında sıradaki yedek anahtara geç
+  switch_on_429: true
+  switch_on_quota_exhausted: true
+  switch_on_error_codes: [429, 503, 403]
+
+  # Boşta Kalınca / Kullanılmayınca Diğer Anahtara Geçiş (Idle Switch)
+  # Belirtilen saniye boyunca istek gelmezse veya anahtar pasif kalırsa sonraki anahtara geçiş yapılır
+  switch_on_idle: true
+  idle_timeout_seconds: 180
+
+  # Yeniden Deneme (Retry) Politikası
+  max_retry_attempts: 3 # Başarısız olursa havuzdaki diğer anahtarlarla kaç kez denensin
+  retry_delay_ms: 1000
+
+  # Soğuma (Cooldown) Süreleri
+  cooldown_on_rate_limit_seconds: 65    # RPM limiti aşıldığında anahtar 65 saniye bekletilir
+  cooldown_on_quota_exceeded_seconds: 86400 # Günlük kota dolunca 24 saat (gece yarısı sıfırlanır)
+  cooldown_on_unknown_error_seconds: 120    # Bilinmeyen hata durumunda 2 dakika dinlendirilir
+
+# API Anahtarları Havuzu (Keys Pool)
+# Render ortamında environment variable olarak virgülle ayrılmış GEMINI_API_KEYS verilebilir:
+# Örnek: GEMINI_API_KEYS="AIzaSyA...,AIzaSyB...,AIzaSyC..."
+# Sistem hem config.yaml içindeki listeyi hem de GEMINI_API_KEYS / GEMINI_API_KEY env değişkenlerini birleştirir.
+keys_pool:
+  - id: "key-primary"
+    name: "Primary Gemini Key"
+    env_var: "GEMINI_API_KEY" # veya direkt key: "AIza..."
+    provider: "google-gemini"
+    enabled: true
+    priority: 1
+
+  - id: "key-backup-1"
+    name: "Backup Gemini Key 1"
+    env_var: "GEMINI_API_KEY_BACKUP_1"
+    provider: "google-gemini"
+    enabled: true
+    priority: 2
+
+  - id: "key-backup-2"
+    name: "Backup Gemini Key 2"
+    env_var: "GEMINI_API_KEY_BACKUP_2"
+    provider: "google-gemini"
+    enabled: true
+    priority: 3
+
+# awesome-freellm-apis Desteklenen Modeller
+models:
+  - id: "gemini-3.8-flash"
+    provider: "google-gemini"
+    display_name: "Gemini 3.8 Flash (Recommended)"
+    type: "chat"
+    context_window: 1048576
+    is_free: true
+
+  - id: "gemini-2.5-flash"
+    provider: "google-gemini"
+    display_name: "Gemini 2.5 Flash"
+    type: "chat"
+    context_window: 1048576
+    is_free: true
+
+  - id: "gemini-2.5-pro"
+    provider: "google-gemini"
+    display_name: "Gemini 2.5 Pro"
+    type: "chat"
+    context_window: 1048576
+    is_free: true
